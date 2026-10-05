@@ -41,6 +41,11 @@ git "${PROXY_ARGS[@]}" push "https://${GH_PAT}@github.com/${REPO}.git" main
 echo "Publishing web/dist to gh-pages..."
 git checkout -q --orphan gh-pages-tmp
 git rm -q -rf .
+# git rm deleted the tracked .gitignore files; without them `git add -A`
+# below would swallow node_modules/, dist/ and .env.local into the pages
+# commit — and the final `git checkout main` would then delete them from
+# the working tree (tracked on the orphan branch, absent on main).
+git checkout -q main -- web/.gitignore .gitignore
 cp -r web/dist/. .
 touch .nojekyll
 git add -A
