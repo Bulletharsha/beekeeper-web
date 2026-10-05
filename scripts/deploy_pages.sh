@@ -49,6 +49,9 @@ git checkout -q main -- web/.gitignore .gitignore
 cp -r web/dist/. .
 touch .nojekyll
 git add -A
+# Keep the restored ignore files out of the published branch (they were
+# only needed so `git add -A` above respected the ignore rules).
+git rm -q --cached web/.gitignore .gitignore 2>/dev/null || true
 git -c user.name=Coca -c user.email=coca@local commit -qm "Deploy Beekeeper PWA"
 git "${PROXY_ARGS[@]}" push "https://${GH_PAT}@github.com/${REPO}.git" gh-pages-tmp:gh-pages --force
 git checkout -q main
