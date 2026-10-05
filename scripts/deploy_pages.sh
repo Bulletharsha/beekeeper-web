@@ -20,6 +20,15 @@ PROXY_ARGS=(-c "http.proxy=$https_proxy" -c "https.proxy=$https_proxy")
 
 cd "$ROOT"
 
+# 0. Hermetic build: node_modules and .env.local are gitignored and may not
+#    survive VM restarts, so install and build here every time.
+if [ ! -f web/.env.local ]; then
+  echo "web/.env.local missing — recreate it with VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY" >&2
+  exit 1
+fi
+echo "Installing dependencies and building..."
+(cd web && npm ci --no-audit --no-fund && npm run build) || exit 1
+
 # 1. Push source to main (first time: remote may not exist yet).
 if ! git remote get-url origin >/dev/null 2>&1; then
   git remote add origin "https://github.com/${REPO}.git"
@@ -29,10 +38,6 @@ git "${PROXY_ARGS[@]}" push "https://${GH_PAT}@github.com/${REPO}.git" main
 
 # 2. Push web/dist to the gh-pages branch. (dist/ is gitignored, so build
 #    the branch directly instead of subtree-split.)
-if [ ! -d web/dist ]; then
-  echo "web/dist missing — run 'npm run build' in web/ first" >&2
-  exit 1
-fi
 echo "Publishing web/dist to gh-pages..."
 git checkout -q --orphan gh-pages-tmp
 git rm -q -rf .
