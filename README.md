@@ -105,3 +105,14 @@ time (gitignored; holds `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`).
 - Git needs the proxy spelled out: `git -c http.proxy="$https_proxy" -c https.proxy="$https_proxy" ...`
 - PostgREST upserts demand SELECT + UPDATE policies in addition to INSERT;
   the word seed uses plain inserts (table was empty).
+- Deploy-script gotchas (learned the hard way):
+  - `git checkout <branch>` at the end of a script reverts UNCOMMITTED changes
+    — always commit `scripts/deploy_pages.sh` before running it.
+  - `git rm -rf .` on the orphan branch deletes the tracked `.gitignore`
+    files; the following `git add -A` then swallows `node_modules/`, `dist/`
+    and `.env.local` into the pages commit, and the final checkout back to
+    `main` deletes them from the working tree. Restore the ignore files
+    (`git checkout main -- web/.gitignore .gitignore`) before `git add -A`,
+    then unstage them before committing.
+  - The script is hermetic: it runs `npm ci` + `npm run build` itself and
+    refuses to run without `web/.env.local`.
