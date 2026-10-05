@@ -24,10 +24,13 @@ any browser on the Mac, anywhere. No Apple Developer account needed.
 
 - **Writes** land in IndexedDB instantly (offline-capable), then a background
   queue pushes to Supabase. Reads prefer local.
-- **Realtime subscriptions** pull other devices' changes in. Handoff is seamless:
-  start a round on the Mac, continue on a phone.
-- **Conflicts**: last-write-wins by timestamp. Per-kid data means real conflicts
-  basically can't happen (a kid is on one device at a time).
+- **Sync** runs on parent sign-in, on reconnect, and after every finished
+  round — push then pull, both idempotent. Handoff happens *between rounds*:
+  finish a round on the Mac and the next round on a phone sees the full
+  history (grade events, rounds, Anjali's ladder rung).
+- **Conflicts**: grade events and rounds are append-only with stable ids, so
+  concurrent writes can't conflict. Anjali's ladder rung is last-write-wins
+  by timestamp.
 - **Service worker** caches the app shell, all 4,000 words, and played audio.
 
 ## Project layout
@@ -45,9 +48,11 @@ web/                    React + Vite + TypeScript PWA
     db/
       database.ts       Dexie IndexedDB schema + word seeding
     audio/
-      player.ts         Scripps MP3 → Groq TTS (via /api/tts) → speechSynthesis
-    components/         React UI
-    sync/               Supabase client, push queue, realtime (Phase 4)
+      player.ts         Scripps MP3 → Groq TTS (edge function) → speechSynthesis
+    lib/
+      supabase.ts       Supabase client (null when unconfigured — app runs local)
+      sync.ts           Push/pull sync engine (idempotent, last-write-wins rung)
+    components/         React UI (ModePicker, PinGate, ParentsHome, KidHome, Quiz)
   public/data/
     words.json          4,000 enriched words (1.6MB minified)
 supabase/
@@ -73,9 +78,30 @@ supabase/
 
 ## Status
 
-- [x] Phase 1: Backend schema + TTS edge function drafted (needs Supabase project)
-- [ ] Phase 2: Core quiz UI (in progress)
-- [ ] Phase 3: Scorecards + adaptive ladder UI
-- [ ] Phase 4: Sync layer + auth
-- [ ] Phase 5: PWA packaging
-- [ ] Phase 6: Cross-device testing
+## Status (2026-10-05)
+
+Live at **https://bulletharsha.github.io/beekeeper-web/** (GitHub Pages).
+
+- [x] Backend schema + RLS applied; 4,000 words seeded (oneBee 1000 / twoBee 2000 / threeBee 1000)
+- [x] TTS edge function deployed (GROQ_API_KEY secret still needs the Groq key in dashboard → Functions → tts → Secrets; app falls back to system speech until then)
+- [x] Core quiz UI, scorecards, adaptive ladder
+- [x] Sync layer + parent magic-link auth (Supabase project `beekeeper`, ref `jbkyahhcgosmlvhktqpz`, us-west-2)
+- [x] PWA packaging (installable, offline-capable)
+- [ ] Cross-device testing: sign in on each device via Parents → Family sync, then verify a round on one device appears on another
+
+## Deploy
+
+`GH_PAT=<token> ./scripts/deploy_pages.sh` — pushes source to `main` and
+`web/dist` to `gh-pages` (served by GitHub Pages). Commit `scripts/deploy_pages.sh`
+before running it: the orphan-branch flow checks out `main` at the end, which
+reverts uncommitted changes. The deploy needs `web/.env.local` present at build
+time (gitignored; holds `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`).
+
+## Environment notes (2026-10-05)
+
+- This VM's egress proxy hangs requests carrying JWT-shaped `Authorization`/
+  `apikey` header values. Use the `sb_publishable_*` key format (never the
+  legacy JWT) from this machine, and send it on the `apikey` header only.
+- Git needs the proxy spelled out: `git -c http.proxy="$https_proxy" -c https.proxy="$https_proxy" ...`
+- PostgREST upserts demand SELECT + UPDATE policies in addition to INSERT;
+  the word seed uses plain inserts (table was empty).
