@@ -25,13 +25,15 @@ async function main() {
   const BATCH = 200;
   for (let i = 0; i < words.length; i += BATCH) {
     const chunk = words.slice(i, i + BATCH);
+    // Plain inserts (no upsert): PostgREST upserts also demand SELECT and
+    // UPDATE policies, but the temp policy only grants INSERT. The table is
+    // empty, so plain inserts are correct here. Publishable key travels on
+    // `apikey` only — never in the Authorization header.
     const res = await fetch(`${URL}/rest/v1/words`, {
       method: 'POST',
       headers: {
         apikey: ANON,
-        Authorization: `Bearer ${ANON}`,
         'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates',
       },
       body: JSON.stringify(chunk),
     });
@@ -43,7 +45,7 @@ async function main() {
   }
 
   const rc = await fetch(`${URL}/rest/v1/words?select=tier`, {
-    headers: { apikey: ANON, Authorization: `Bearer ${ANON}` },
+    headers: { apikey: ANON },
   });
   console.log('verify status:', rc.status, '(RLS: anon select should be blocked until auth)');
 }
