@@ -103,7 +103,9 @@ export async function setMeta(key: string, value: unknown): Promise<void> {
 export async function ensureWordsSeeded(): Promise<void> {
   const count = await db.words.count();
   if (count < 4000) {
-    const res = await fetch('/data/words.json');
+    // BASE_URL-aware: the app may be served from a subpath (e.g. Pages).
+    const res = await fetch(`${import.meta.env.BASE_URL}data/words.json`);
+    if (!res.ok) throw new Error(`words.json fetch failed: ${res.status}`);
     const data = await res.json();
     const words: WordRow[] = (data.words as any[]).map((w) => ({
       id: w.id,

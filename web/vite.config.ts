@@ -35,7 +35,7 @@ export default defineConfig({
         // App shell + words data: cache first, always available offline.
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname === '/data/words.json',
+            urlPattern: ({ url }) => url.pathname.endsWith('/data/words.json'),
             handler: 'CacheFirst',
             options: {
               cacheName: 'beekeeper-words',

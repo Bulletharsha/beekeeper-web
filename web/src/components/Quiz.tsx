@@ -33,6 +33,7 @@ const HINTS: { kind: HintKind; label: string }[] = [
 
 export default function Quiz({ profile, onExit }: Props) {
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [answer, setAnswer] = useState('');
   const [, force] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -51,6 +52,13 @@ export default function Quiz({ profile, onExit }: Props) {
         db.wordRecords.toArray(),
         db.gradeEvents.toArray(),
       ]);
+      if (words.length === 0) {
+        // Word list failed to load (e.g. offline on first run) — say so
+        // plainly instead of "completing" an empty round.
+        setLoadError(true);
+        setReady(true);
+        return;
+      }
       entriesRef.current = words.map(toEntry);
       recordsRef.current = records.map((r) => ({
         wordID: r.wordID,
@@ -197,10 +205,29 @@ export default function Quiz({ profile, onExit }: Props) {
     refresh();
   }
 
-  if (!ready || !engine) {
+  if (!ready || (!engine && !loadError)) {
     return (
       <div className="screen quiz">
         <p>Loading…</p>
+      </div>
+    );
+  }
+
+  if (loadError || !engine) {
+    return (
+      <div className="screen quiz">
+        <div className="quiz-card">
+          <h2>Couldn't load the words</h2>
+          <p style={{ color: 'var(--muted)' }}>
+            The word list didn't download. Connect to the internet once and try
+            again — after that it works offline.
+          </p>
+          <div className="quiz-actions" style={{ justifyContent: 'center' }}>
+            <button className="primary" onClick={onExit}>
+              Back
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
