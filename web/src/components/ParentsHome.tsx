@@ -35,7 +35,8 @@ export default function ParentsHome({ session, onBack }: Props) {
     setError('');
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
+      // Return to the app itself after the email link is clicked.
+      options: { emailRedirectTo: window.location.origin + import.meta.env.BASE_URL },
     });
     setSending(false);
     if (error) setError(error.message);
