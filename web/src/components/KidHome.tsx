@@ -3,11 +3,13 @@ import type { KidProfile } from '../App';
 import { KID_NAMES } from '../App';
 import { db, type KidRoundRow } from '../db/database';
 import { KidScorecardStats } from '../logic/scorecard';
+import { hasSavedRound, type SavedRoundState } from '../logic/quiz';
 
 interface Props {
   profile: KidProfile;
   onBack: () => void;
   onStart: () => void;
+  onContinue: () => void;
 }
 
 function pct(x: number): string {
@@ -18,11 +20,13 @@ function stars(n: number): string {
   return '★'.repeat(n) + '☆'.repeat(Math.max(0, 3 - n));
 }
 
-export default function KidHome({ profile, onBack, onStart }: Props) {
+export default function KidHome({ profile, onBack, onStart, onContinue }: Props) {
   const [rounds, setRounds] = useState<KidRoundRow[]>([]);
+  const [saved, setSaved] = useState<SavedRoundState | null>(null);
 
   useEffect(() => {
     db.kidRounds.where('kid').equals(profile).reverse().sortBy('startedAt').then(setRounds);
+    setSaved(hasSavedRound(profile));
   }, [profile]);
 
   const stats = new KidScorecardStats(
@@ -59,6 +63,13 @@ export default function KidHome({ profile, onBack, onStart }: Props) {
       <button className="primary start-btn" onClick={onStart}>
         Start practicing
       </button>
+
+      {saved && (
+        <button className="secondary start-btn" onClick={onContinue} style={{ marginTop: 8 }}>
+          Continue — word {Math.min(saved.index + 1, saved.queueIDs.length)} of {saved.queueIDs.length}
+          {saved.isRetryPass ? ' (retry pass)' : ''}
+        </button>
+      )}
 
       {stats.roundCount === 0 ? (
         <div className="empty-state">

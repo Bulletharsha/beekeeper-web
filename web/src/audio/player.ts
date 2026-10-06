@@ -6,7 +6,7 @@
  *  the browser. Until the backend exists, speakText falls back to speechSynthesis.
  */
 
-import { getCachedToken, SUPABASE_ANON_KEY, SUPABASE_URL } from '../lib/supabase';
+import { supabase, SUPABASE_ANON_KEY, SUPABASE_URL } from '../lib/supabase';
 
 export type GroqVoiceId = 'autumn' | 'diana' | 'hannah' | 'austin' | 'daniel' | 'troy';
 
@@ -95,31 +95,48 @@ export function speakText(text: string, cheerful = false, rate = 0.95): void {
   if (TTS_URL && SUPABASE_ANON_KEY && !groqKnownMissing) {
     // Groq via edge function, in the background. Falls back to system
     // speech if the key isn't configured server-side yet.
-    void fetchGroqNarration(text, voice, cheerful, key, getCachedToken(), rate);
+    void fetchGroqNarration(text, voice, cheerful, key, rate);
     return;
   }
   speakWithFallback(text, rate);
 }
 
-/** Groq Orpheus narration (async by nature). */
+/** Groq Orpheus narration (async by nature). Gets a fresh token (signing in
+ *  anonymously if needed) rather than trusting the cached one, and retries
+ *  once on 401 in case the session expired. */
 async function fetchGroqNarration(
   text: string,
   voice: GroqVoiceId,
   cheerful: boolean,
   key: string,
-  token: string | null,
   rate: number,
 ): Promise<void> {
   try {
-    const res = await fetch(TTS_URL as string, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${token ?? SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({ text, voice, cheerful }),
-    });
+    let token: string | null = null;
+    if (supabase) {
+      const { data } = await supabase.auth.getSession();
+      token = data.session?.access_token ?? null;
+      if (!token) {
+        const { data: anon } = await supabase.auth.signInAnonymously();
+        token = anon.session?.access_token ?? null;
+      }
+    }
+    const doFetch = (t: string | null) =>
+      fetch(TTS_URL as string, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${t ?? SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ text, voice, cheerful }),
+      });
+    let res = await doFetch(token);
+    if (res.status === 401 && supabase) {
+      // Token may have expired — refresh and retry once.
+      const { data } = await supabase.auth.refreshSession();
+      res = await doFetch(data.session?.access_token ?? null);
+    }
     if (!res.ok) {
       if (res.status === 503) groqKnownMissing = true; // no server key yet
       throw new Error(`tts ${res.status}`);

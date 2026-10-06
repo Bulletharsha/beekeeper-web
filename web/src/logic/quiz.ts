@@ -70,6 +70,45 @@ export const GENTLE_PHRASES = [
   'Nice effort.',
 ];
 
+/** Serializable snapshot of an in-progress round, for resume-later. */
+export interface SavedRoundState {
+  profile: KidProfile;
+  queueIDs: string[];
+  index: number;
+  missedIDs: string[];
+  mainAnswered: number;
+  mainCorrect: number;
+  isRetryPass: boolean;
+  stars: number;
+  savedAt: number;
+}
+
+const ROUND_KEY = (profile: KidProfile) => `beekeeper.round.${profile}`;
+
+/** Return the saved in-progress round for a profile, or null. */
+export function hasSavedRound(profile: KidProfile): SavedRoundState | null {
+  try {
+    const raw = localStorage.getItem(ROUND_KEY(profile));
+    if (!raw) return null;
+    const s = JSON.parse(raw) as SavedRoundState;
+    if (!s || s.profile !== profile || !Array.isArray(s.queueIDs) || s.queueIDs.length === 0) {
+      return null;
+    }
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/** Discard the saved in-progress round for a profile. */
+export function clearSavedRound(profile: KidProfile): void {
+  try {
+    localStorage.removeItem(ROUND_KEY(profile));
+  } catch {
+    /* ignore */
+  }
+}
+
 export class QuizEngine {
   readonly profile: KidProfile;
   private readonly wordEntries: WordEntry[];
@@ -117,6 +156,7 @@ export class QuizEngine {
 
   /** Begin a new round: resolve the rung, build the 10-word queue, ask word one. */
   startRound(): void {
+    clearSavedRound(this.profile); // a fresh round replaces any saved one
     const records = this.callbacks.getRecords();
     const events = this.callbacks.getEvents();
     const level = resolvedLevel(this.callbacks.getStoredLevel(), this.profile, events, records);
@@ -152,6 +192,63 @@ export class QuizEngine {
     }
     this.stage = 'asking';
     this.callbacks.playWord(queue[0]);
+    this.saveRound();
+  }
+
+  /** Persist the in-progress round so the kid can resume later. Called
+   *  after the round state advances (start/next). A finished round clears. */
+  saveRound(): void {
+    if (this.stage === 'done' || this.queue.length === 0) {
+      clearSavedRound(this.profile);
+      return;
+    }
+    const s: SavedRoundState = {
+      profile: this.profile,
+      queueIDs: this.queue.map((e) => e.id),
+      index: this.index,
+      missedIDs: this.missed.map((e) => e.id),
+      mainAnswered: this.mainAnswered,
+      mainCorrect: this.mainCorrect,
+      isRetryPass: this.isRetryPass,
+      stars: this.stars,
+      savedAt: Date.now(),
+    };
+    try {
+      localStorage.setItem(ROUND_KEY(this.profile), JSON.stringify(s));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Restore a previously saved round. Returns false when a queued word is
+   * no longer in the word list (caller should start a fresh round).
+   */
+  resumeRound(s: SavedRoundState): boolean {
+    const byID = new Map(this.wordEntries.map((e) => [e.id, e] as const));
+    const queue: WordEntry[] = [];
+    for (const id of s.queueIDs) {
+      const e = byID.get(id);
+      if (!e) return false;
+      queue.push(e);
+    }
+    const missed: WordEntry[] = [];
+    for (const id of s.missedIDs) {
+      const e = byID.get(id);
+      if (e) missed.push(e);
+    }
+    this.queue = queue;
+    this.index = Math.max(0, Math.min(s.index, queue.length - 1));
+    this.missed = missed;
+    this.mainAnswered = s.mainAnswered;
+    this.mainCorrect = s.mainCorrect;
+    this.isRetryPass = s.isRetryPass;
+    this.stars = s.stars;
+    this.answer = '';
+    this.lastCorrect = null;
+    this.stage = 'asking';
+    this.callbacks.playWord(this.queue[this.index]);
+    return true;
   }
 
   /**
@@ -201,6 +298,7 @@ export class QuizEngine {
     if (this.index < this.queue.length) {
       this.stage = 'asking';
       this.callbacks.playWord(this.queue[this.index]);
+      this.saveRound();
       return;
     }
     if (!this.isRetryPass && this.missed.length > 0) {
@@ -210,6 +308,7 @@ export class QuizEngine {
       this.isRetryPass = true;
       this.stage = 'asking';
       this.callbacks.playWord(this.queue[0]);
+      this.saveRound();
       return;
     }
     this.finishRound();
@@ -271,6 +370,7 @@ export class QuizEngine {
   }
 
   private finishRound(): void {
+    clearSavedRound(this.profile);
     const accuracy = this.mainAnswered > 0 ? this.mainCorrect / this.mainAnswered : 0;
     this.stars = starsFor(accuracy);
     if (this.mainAnswered > 0) {

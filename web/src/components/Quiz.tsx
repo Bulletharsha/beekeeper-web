@@ -3,13 +3,15 @@ import type { KidProfile } from '../App';
 import { KID_NAMES } from '../App';
 import { db, getMeta, setMeta, type WordRow } from '../db/database';
 import { playWordAudio, speakText, stopAudio } from '../audio/player';
-import { QuizEngine, type HintKind } from '../logic/quiz';
+import { QuizEngine, hasSavedRound, clearSavedRound, type HintKind } from '../logic/quiz';
 import { KidsPolicy } from '../logic/policy';
 import type { GradeEvent, WordEntry, WordRecord } from '../logic/types';
 
 interface Props {
   profile: KidProfile;
   onExit: () => void;
+  /** When true, pick up the saved in-progress round instead of starting new. */
+  resume?: boolean;
 }
 
 function toEntry(w: WordRow): WordEntry {
@@ -32,7 +34,7 @@ const HINTS: { kind: HintKind; label: string }[] = [
   { kind: 'kind', label: 'Word kind' },
 ];
 
-export default function Quiz({ profile, onExit }: Props) {
+export default function Quiz({ profile, onExit, resume }: Props) {
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [answer, setAnswer] = useState('');
@@ -176,8 +178,14 @@ export default function Quiz({ profile, onExit }: Props) {
       });
 
       // Each round gets its own session number so the cloud history can
-      // group a device's answers into rounds.
+      // group a device's answers into rounds. Resuming keeps the same
+      // session — it's a continuation, not a new round.
       beginRoundRef.current = () => {
+        const saved = resume ? hasSavedRound(profile) : null;
+        if (saved && engine.resumeRound(saved)) {
+          return;
+        }
+        if (saved) clearSavedRound(profile); // stale words; start fresh
         sessionNumber += 1;
         void setMeta(`beekeeper.session.${profile}`, sessionNumber);
         engine.startRound();

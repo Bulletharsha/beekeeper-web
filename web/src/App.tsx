@@ -16,7 +16,7 @@ export type Screen =
   | { name: 'pin' }
   | { name: 'parents' }
   | { name: 'kid'; profile: KidProfile }
-  | { name: 'quiz'; profile: KidProfile };
+  | { name: 'quiz'; profile: KidProfile; resume?: boolean };
 
 export const KID_NAMES: Record<KidProfile, string> = {
   arya: 'Arya',
@@ -101,10 +101,15 @@ function App() {
           profile={screen.profile}
           onBack={() => setScreen({ name: 'mode' })}
           onStart={() => setScreen({ name: 'quiz', profile: screen.profile })}
+          onContinue={() => setScreen({ name: 'quiz', profile: screen.profile, resume: true })}
         />
       )}
       {screen.name === 'quiz' && (
-        <Quiz profile={screen.profile} onExit={() => exitQuiz(screen.profile)} />
+        <Quiz
+          profile={screen.profile}
+          resume={screen.resume}
+          onExit={() => exitQuiz(screen.profile)}
+        />
       )}
     </div>
   );
