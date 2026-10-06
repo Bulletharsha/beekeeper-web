@@ -46,10 +46,10 @@ git rm -q -rf .
 cp -r web/dist/. .
 touch .nojekyll
 # Add only the site files. Never a bare `git add -A` here: `git rm` above
-# deleted the tracked .gitignore files, so -A would swallow web/node_modules,
-# web/dist and web/.env.local into the pages commit — and the final checkout
+# deleted the tracked .gitignore files, so -A would swallow node_modules,
+# dist and .env.local into the pages commit — and the final checkout
 # back to main would then delete them from disk.
-git add -A -- ':!web'
+git add -A -- ':!web' ':!supabase'
 git -c user.name=Coca -c user.email=coca@local commit -qm "Deploy Beekeeper PWA"
 git "${PROXY_ARGS[@]}" push "https://${GH_PAT}@github.com/${REPO}.git" gh-pages-tmp:gh-pages --force
 git checkout -q main
