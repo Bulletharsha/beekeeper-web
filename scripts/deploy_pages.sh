@@ -39,19 +39,17 @@ git "${PROXY_ARGS[@]}" push "https://${GH_PAT}@github.com/${REPO}.git" main
 # 2. Push web/dist to the gh-pages branch. (dist/ is gitignored, so build
 #    the branch directly instead of subtree-split.)
 echo "Publishing web/dist to gh-pages..."
+git checkout -q main
+git branch -q -D gh-pages-tmp 2>/dev/null || true
 git checkout -q --orphan gh-pages-tmp
 git rm -q -rf .
-# git rm deleted the tracked .gitignore files; without them `git add -A`
-# below would swallow node_modules/, dist/ and .env.local into the pages
-# commit — and the final `git checkout main` would then delete them from
-# the working tree (tracked on the orphan branch, absent on main).
-git checkout -q main -- web/.gitignore .gitignore
 cp -r web/dist/. .
 touch .nojekyll
-git add -A
-# Keep the restored ignore files out of the published branch (they were
-# only needed so `git add -A` above respected the ignore rules).
-git rm -q --cached web/.gitignore .gitignore 2>/dev/null || true
+# Add only the site files. Never a bare `git add -A` here: `git rm` above
+# deleted the tracked .gitignore files, so -A would swallow web/node_modules,
+# web/dist and web/.env.local into the pages commit — and the final checkout
+# back to main would then delete them from disk.
+git add -A -- ':!web'
 git -c user.name=Coca -c user.email=coca@local commit -qm "Deploy Beekeeper PWA"
 git "${PROXY_ARGS[@]}" push "https://${GH_PAT}@github.com/${REPO}.git" gh-pages-tmp:gh-pages --force
 git checkout -q main
