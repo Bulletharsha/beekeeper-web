@@ -39,3 +39,18 @@ if (supabase) {
 export function getCachedToken(): string | null {
   return cachedToken;
 }
+
+// Kids mode needs a user JWT for the TTS edge function, but kids don't
+// sign in — so every device gets an anonymous Supabase user on first
+// launch. (Requires the Anonymous provider enabled in Auth settings.)
+// Anonymous users satisfy the same "authenticated" RLS policies; all kid
+// data stays attributed by 'arya'/'anjali', not by user.
+if (supabase) {
+  supabase.auth.getSession().then(({ data }) => {
+    if (!data.session) {
+      supabase!.auth.signInAnonymously().then(({ error }) => {
+        if (error) console.warn('anonymous sign-in failed:', error.message);
+      });
+    }
+  });
+}
