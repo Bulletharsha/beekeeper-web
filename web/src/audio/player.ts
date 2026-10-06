@@ -119,6 +119,30 @@ async function fetchGroqNarration(
   }
 }
 
+/** Best available system voice, picked once voices load. iOS Safari
+ *  populates getVoices() asynchronously, so we (re)pick on voiceschanged.
+ *  Without this the utterance gets whatever the default is — often the
+ *  most robotic compact voice on the device. */
+let preferredVoice: SpeechSynthesisVoice | null = null;
+
+function pickVoice(): void {
+  if (!('speechSynthesis' in window)) return;
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return;
+  preferredVoice =
+    voices.find((v) => v.lang === 'en-US' && /samantha/i.test(v.name)) ??
+    voices.find((v) => v.lang === 'en-US' && v.localService && /female/i.test(v.name)) ??
+    voices.find((v) => v.lang === 'en-US' && v.localService) ??
+    voices.find((v) => v.lang?.startsWith('en-US')) ??
+    voices.find((v) => v.lang?.startsWith('en')) ??
+    null;
+}
+
+if ('speechSynthesis' in window) {
+  pickVoice();
+  window.speechSynthesis.addEventListener('voiceschanged', pickVoice);
+}
+
 /** Offline / no-backend fallback: the browser's built-in speech. Must run
  *  synchronously inside the tap handler on iOS. */
 function speakWithFallback(text: string): void {
@@ -126,6 +150,8 @@ function speakWithFallback(text: string): void {
   const synth = window.speechSynthesis;
   const u = new SpeechSynthesisUtterance(text);
   u.rate = 0.95;
+  if (!preferredVoice) pickVoice();
+  if (preferredVoice) u.voice = preferredVoice;
   synth.speak(u);
   // iOS Safari sometimes parks speechSynthesis in a stuck paused state
   // where speak() silently does nothing; resume() unsticks it.
