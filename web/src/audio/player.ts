@@ -70,7 +70,7 @@ export function playWordAudio(audioUrl: string | undefined, spelling: string): v
  *  browser's speech synthesis -- called SYNCHRONOUSLY. iOS Safari silently
  *  ignores speechSynthesis.speak() once the user-gesture call stack is gone,
  *  so no await may precede it on that path. */
-export function speakText(text: string, cheerful = false): void {
+export function speakText(text: string, cheerful = false, rate = 0.95): void {
   stopCurrent();
   const voice = getVoice();
   const key = cacheKey(text, voice, cheerful);
@@ -78,7 +78,7 @@ export function speakText(text: string, cheerful = false): void {
   if (cached) {
     const audio = new Audio(cached);
     currentAudio = audio;
-    audio.play().catch(() => speakWithFallback(text));
+    audio.play().catch(() => speakWithFallback(text, rate));
     return;
   }
   const token = getCachedToken();
@@ -87,7 +87,7 @@ export function speakText(text: string, cheerful = false): void {
     void fetchGroqNarration(text, voice, cheerful, key, token);
     return;
   }
-  speakWithFallback(text);
+  speakWithFallback(text, rate);
 }
 
 /** Groq Orpheus narration for signed-in parents (async by nature). */
@@ -145,11 +145,11 @@ if ('speechSynthesis' in window) {
 
 /** Offline / no-backend fallback: the browser's built-in speech. Must run
  *  synchronously inside the tap handler on iOS. */
-function speakWithFallback(text: string): void {
+function speakWithFallback(text: string, rate = 0.95): void {
   if (!('speechSynthesis' in window)) return;
   const synth = window.speechSynthesis;
   const u = new SpeechSynthesisUtterance(text);
-  u.rate = 0.95;
+  u.rate = rate;
   if (!preferredVoice) pickVoice();
   if (preferredVoice) u.voice = preferredVoice;
   synth.speak(u);
