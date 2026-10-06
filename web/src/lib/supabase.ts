@@ -6,6 +6,7 @@ const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 export const SUPABASE_URL = url ?? '';
+export const SUPABASE_ANON_KEY = anonKey ?? '';
 export const isCloudConfigured = !!url && !!anonKey;
 
 export const supabase: SupabaseClient | null =

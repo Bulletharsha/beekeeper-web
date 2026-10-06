@@ -6,7 +6,7 @@
  *  the browser. Until the backend exists, speakText falls back to speechSynthesis.
  */
 
-import { getCachedToken, SUPABASE_URL } from '../lib/supabase';
+import { getCachedToken, SUPABASE_ANON_KEY, SUPABASE_URL } from '../lib/supabase';
 
 export type GroqVoiceId = 'autumn' | 'diana' | 'hannah' | 'austin' | 'daniel' | 'troy';
 
@@ -22,6 +22,9 @@ export const GROQ_VOICES: { id: GroqVoiceId; label: string }[] = [
 const TTS_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/tts` : null;
 const VOICE_KEY = 'beekeeper.voice';
 const ttsCache = new Map<string, string>(); // cacheKey -> object URL
+/** Set when the server reports 503 (no GROQ_API_KEY yet): skip Groq and
+ *  go straight to system speech for the rest of this page load. */
+let groqKnownMissing = false;
 
 function cacheKey(text: string, voice: GroqVoiceId, cheerful: boolean): string {
   return `${voice}|${cheerful ? 'c' : 'n'}|${text}`;
@@ -65,11 +68,12 @@ export function playWordAudio(audioUrl: string | undefined, spelling: string): v
   }
 }
 
-/** Narrate non-word text. A signed-in parent gets Groq Orpheus narration
- *  via the edge function; everyone else (the kids' normal path) gets the
- *  browser's speech synthesis -- called SYNCHRONOUSLY. iOS Safari silently
- *  ignores speechSynthesis.speak() once the user-gesture call stack is gone,
- *  so no await may precede it on that path. */
+/** Narrate non-word text. Tries Groq Orpheus via our edge function first
+ *  (kids mode included — the function accepts our app's anon key and
+ *  rate-limits; no sign-in needed), falling back to the browser's speech
+ *  synthesis — called SYNCHRONOUSLY. iOS Safari silently ignores
+ *  speechSynthesis.speak() once the user-gesture call stack is gone, so
+ *  no await may precede it on the fallback path. */
 export function speakText(text: string, cheerful = false, rate = 0.95): void {
   stopCurrent();
   const voice = getVoice();
@@ -81,41 +85,46 @@ export function speakText(text: string, cheerful = false, rate = 0.95): void {
     audio.play().catch(() => speakWithFallback(text, rate));
     return;
   }
-  const token = getCachedToken();
-  if (TTS_URL && token) {
-    // Signed-in parent path: fetch Groq narration in the background.
-    void fetchGroqNarration(text, voice, cheerful, key, token);
+  if (TTS_URL && SUPABASE_ANON_KEY && !groqKnownMissing) {
+    // Groq via edge function, in the background. Falls back to system
+    // speech if the key isn't configured server-side yet.
+    void fetchGroqNarration(text, voice, cheerful, key, getCachedToken(), rate);
     return;
   }
   speakWithFallback(text, rate);
 }
 
-/** Groq Orpheus narration for signed-in parents (async by nature). */
+/** Groq Orpheus narration (async by nature). */
 async function fetchGroqNarration(
   text: string,
   voice: GroqVoiceId,
   cheerful: boolean,
   key: string,
-  token: string,
+  token: string | null,
+  rate: number,
 ): Promise<void> {
   try {
     const res = await fetch(TTS_URL as string, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${token ?? SUPABASE_ANON_KEY}`,
       },
       body: JSON.stringify({ text, voice, cheerful }),
     });
-    if (!res.ok) throw new Error(`tts ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 503) groqKnownMissing = true; // no server key yet
+      throw new Error(`tts ${res.status}`);
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     ttsCache.set(key, url);
     const audio = new Audio(url);
     currentAudio = audio;
-    await audio.play().catch(() => speakWithFallback(text));
+    await audio.play().catch(() => speakWithFallback(text, rate));
   } catch {
-    speakWithFallback(text);
+    speakWithFallback(text, rate);
   }
 }
 

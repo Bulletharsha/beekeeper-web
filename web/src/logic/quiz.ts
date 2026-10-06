@@ -177,7 +177,11 @@ export class QuizEngine {
     }
 
     if (correct) {
-      this.callbacks.speakText(this.pick(PRAISE_PHRASES), true);
+      // Spell it back too — hearing the correct spelling reinforces it.
+      this.callbacks.speakText(
+        `${this.pick(PRAISE_PHRASES)} ${spelledAloud(entry.spelling)}`,
+        true,
+      );
     } else {
       this.callbacks.speakText(
         `${this.pick(GENTLE_PHRASES)} The correct spelling is: ${spelledAloud(entry.spelling)}`,
