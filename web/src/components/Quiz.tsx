@@ -282,8 +282,8 @@ export default function Quiz({ profile, onExit }: Props) {
               <button
                 key={h.kind}
                 onClick={() => {
-                  // Hints read ~15% slower so young kids can follow.
-                  void speakText(engine.hintText(h.kind), false, 0.8);
+                  // Hints read slower so young kids can follow.
+                  void speakText(engine.hintText(h.kind), false, 0.72);
                 }}
               >
                 {h.label}
