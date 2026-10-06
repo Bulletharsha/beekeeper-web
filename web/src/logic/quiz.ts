@@ -20,7 +20,7 @@
  */
 
 import { isCorrect, spelledAloud } from './grading';
-import { comfortMixing, nextWord, resolvedLevel } from './pool';
+import { comfortMixing, nextWord, resolvedLevel, stretchMixing } from './pool';
 import { KidsPolicy, starsFor } from './policy';
 import type { GradeEvent, KidProfile, WordEntry, WordRecord } from './types';
 
@@ -122,12 +122,13 @@ export class QuizEngine {
     const level = resolvedLevel(this.callbacks.getStoredLevel(), this.profile, events, records);
     this.callbacks.setStoredLevel(level);
     const comfort = comfortMixing(events, this.profile, records, level);
+    const stretch = stretchMixing(events, this.profile, records, level);
 
     const byID = new Map(this.wordEntries.map((e) => [e.id, e] as const));
     const practiced = new Set<string>();
     const queue: WordEntry[] = [];
     for (let i = 0; i < KidsPolicy.roundSize; i++) {
-      const record = nextWord(records, events, this.profile, level, comfort, practiced, this.rng);
+      const record = nextWord(records, events, this.profile, level, comfort, stretch, practiced, this.rng);
       if (!record) break;
       practiced.add(record.wordID);
       const entry = byID.get(record.wordID);

@@ -6,7 +6,7 @@
  *  the browser. Until the backend exists, speakText falls back to speechSynthesis.
  */
 
-import { getAccessToken, SUPABASE_URL } from '../lib/supabase';
+import { getCachedToken, SUPABASE_URL } from '../lib/supabase';
 
 export type GroqVoiceId = 'autumn' | 'diana' | 'hannah' | 'austin' | 'daniel' | 'troy';
 
@@ -44,7 +44,13 @@ function stopCurrent(): void {
     currentAudio.currentTime = 0;
     currentAudio = null;
   }
-  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  if ('speechSynthesis' in window) {
+    const synth = window.speechSynthesis;
+    // Only cancel when something is actually queued/playing: on iOS a
+    // no-op cancel() immediately followed by speak() can swallow the
+    // new utterance.
+    if (synth.speaking || synth.pending) synth.cancel();
+  }
 }
 
 /** Play the official Scripps pronunciation MP3 for a word. */
@@ -59,9 +65,12 @@ export function playWordAudio(audioUrl: string | undefined, spelling: string): v
   }
 }
 
-/** Narrate non-word text. Tries Groq via our edge function (parent must be
- *  signed in), falls back to the browser's speech synthesis. */
-export async function speakText(text: string, cheerful = false): Promise<void> {
+/** Narrate non-word text. A signed-in parent gets Groq Orpheus narration
+ *  via the edge function; everyone else (the kids' normal path) gets the
+ *  browser's speech synthesis -- called SYNCHRONOUSLY. iOS Safari silently
+ *  ignores speechSynthesis.speak() once the user-gesture call stack is gone,
+ *  so no await may precede it on that path. */
+export function speakText(text: string, cheerful = false): void {
   stopCurrent();
   const voice = getVoice();
   const key = cacheKey(text, voice, cheerful);
@@ -69,18 +78,32 @@ export async function speakText(text: string, cheerful = false): Promise<void> {
   if (cached) {
     const audio = new Audio(cached);
     currentAudio = audio;
-    await audio.play().catch(() => speakWithFallback(text));
+    audio.play().catch(() => speakWithFallback(text));
     return;
   }
+  const token = getCachedToken();
+  if (TTS_URL && token) {
+    // Signed-in parent path: fetch Groq narration in the background.
+    void fetchGroqNarration(text, voice, cheerful, key, token);
+    return;
+  }
+  speakWithFallback(text);
+}
+
+/** Groq Orpheus narration for signed-in parents (async by nature). */
+async function fetchGroqNarration(
+  text: string,
+  voice: GroqVoiceId,
+  cheerful: boolean,
+  key: string,
+  token: string,
+): Promise<void> {
   try {
-    if (!TTS_URL) throw new Error('tts not configured');
-    const token = await getAccessToken();
-    if (!token) throw new Error('not signed in');
-    const res = await fetch(TTS_URL, {
+    const res = await fetch(TTS_URL as string, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({ text, voice, cheerful }),
     });
@@ -96,12 +119,17 @@ export async function speakText(text: string, cheerful = false): Promise<void> {
   }
 }
 
-/** Offline / no-backend fallback: the browser's built-in speech. */
+/** Offline / no-backend fallback: the browser's built-in speech. Must run
+ *  synchronously inside the tap handler on iOS. */
 function speakWithFallback(text: string): void {
   if (!('speechSynthesis' in window)) return;
+  const synth = window.speechSynthesis;
   const u = new SpeechSynthesisUtterance(text);
   u.rate = 0.95;
-  window.speechSynthesis.speak(u);
+  synth.speak(u);
+  // iOS Safari sometimes parks speechSynthesis in a stuck paused state
+  // where speak() silently does nothing; resume() unsticks it.
+  if (synth.paused) synth.resume();
 }
 
 /** Spell a word aloud letter by letter: "A. B. A. F. T." */

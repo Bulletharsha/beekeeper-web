@@ -18,3 +18,23 @@ export async function getAccessToken(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
 }
+
+/** Synchronously-readable auth state. iOS Safari only honors
+ *  speechSynthesis.speak() inside the user-gesture call stack, so the
+ *  audio layer must know sign-in state WITHOUT awaiting. */
+let cachedToken: string | null = null;
+
+if (supabase) {
+  supabase.auth.getSession().then(({ data }) => {
+    cachedToken = data.session?.access_token ?? null;
+  });
+  supabase.auth.onAuthStateChange((_event, session) => {
+    cachedToken = session?.access_token ?? null;
+  });
+}
+
+/** Sync access token, null when not signed in. May lag a few ms right after
+ *  page load; getAccessToken() is authoritative for non-urgent callers. */
+export function getCachedToken(): string | null {
+  return cachedToken;
+}

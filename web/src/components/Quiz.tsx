@@ -4,6 +4,7 @@ import { KID_NAMES } from '../App';
 import { db, getMeta, setMeta, type WordRow } from '../db/database';
 import { playWordAudio, speakText, stopAudio } from '../audio/player';
 import { QuizEngine, type HintKind } from '../logic/quiz';
+import { KidsPolicy } from '../logic/policy';
 import type { GradeEvent, WordEntry, WordRecord } from '../logic/types';
 
 interface Props {
@@ -80,7 +81,18 @@ export default function Quiz({ profile, onExit }: Props) {
 
       // Load persisted adaptive state before the engine is built, so the
       // callbacks close over live mutable values — no patching needed.
-      let currentLevel = await getMeta<number>(`beekeeper.level.${profile}`, 0);
+      // Level schema v2: the shared 5-rung ladder replaced Anjali's old
+      // 4-rung one; reset stored rungs to each kid's start level once.
+      const levelSchema = await getMeta<number>('beekeeper.levelSchema', 1);
+      let currentLevel: number =
+        (await getMeta<number | null>(`beekeeper.level.${profile}`, null)) ??
+        KidsPolicy.startLevel[profile] ??
+        0;
+      if (levelSchema < 2) {
+        currentLevel = KidsPolicy.startLevel[profile] ?? 0;
+        await setMeta(`beekeeper.level.${profile}`, currentLevel);
+        await setMeta('beekeeper.levelSchema', 2);
+      }
       let sessionNumber = await getMeta<number>(`beekeeper.session.${profile}`, 0);
 
       const engine = new QuizEngine(profile, entriesRef.current, {
@@ -153,10 +165,8 @@ export default function Quiz({ profile, onExit }: Props) {
         setStoredLevel: (n) => {
           currentLevel = n;
           void setMeta(`beekeeper.level.${profile}`, n);
-          if (profile === 'anjali') {
-            // Timestamped for last-write-wins sync of Anjali's rung.
-            void setMeta('beekeeper.levelUpdatedAt.anjali', Date.now());
-          }
+          // Timestamped for last-write-wins sync of each kid's rung.
+          void setMeta(`beekeeper.levelUpdatedAt.${profile}`, Date.now());
         },
         playWord: (e) => playWordAudio(e.audioUrl, e.spelling),
         speakText: (text, cheerful) => {
@@ -291,6 +301,7 @@ export default function Quiz({ profile, onExit }: Props) {
                 autoCapitalize="off"
                 autoCorrect="off"
                 spellCheck={false}
+                enterKeyHint="go"
               />
               <div className="quiz-actions">
                 <button type="submit" className="primary" disabled={answer.trim() === ''}>

@@ -122,26 +122,30 @@ async function pushChanges(): Promise<number> {
     n++;
   }
 
-  // Anjali's ladder rung: last-write-wins by timestamp.
-  const localLevel = await getMeta<number>('beekeeper.level.anjali', 0);
-  const localTs = await getMeta<number>('beekeeper.levelUpdatedAt.anjali', 0);
-  const { data: remote, error: sErr } = await client
-    .from('kid_state')
-    .select('anjali_level, updated_at')
-    .eq('kid', 'anjali')
-    .maybeSingle();
-  if (sErr) throw new Error(`read kid_state: ${sErr.message}`);
-  const remoteTs = remote ? Date.parse(remote.updated_at as string) : 0;
-  if (!remote || localTs >= remoteTs) {
-    const { error } = await client.from('kid_state').upsert(
-      {
-        kid: 'anjali',
-        anjali_level: localLevel,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'kid' },
-    );
-    if (error) throw new Error(`push kid_state: ${error.message}`);
+  // Each kid's ladder rung: last-write-wins by timestamp.
+  // NOTE: the column is historically named anjali_level; it stores the
+  // rung for whichever kid the row belongs to.
+  for (const kid of ['arya', 'anjali'] as const) {
+    const localLevel = await getMeta<number>(`beekeeper.level.${kid}`, 0);
+    const localTs = await getMeta<number>(`beekeeper.levelUpdatedAt.${kid}`, 0);
+    const { data: remote, error: sErr } = await client
+      .from('kid_state')
+      .select('anjali_level, updated_at')
+      .eq('kid', kid)
+      .maybeSingle();
+    if (sErr) throw new Error(`read kid_state: ${sErr.message}`);
+    const remoteTs = remote ? Date.parse(remote.updated_at as string) : 0;
+    if (!remote || localTs >= remoteTs) {
+      const { error } = await client.from('kid_state').upsert(
+        {
+          kid,
+          anjali_level: localLevel,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'kid' },
+      );
+      if (error) throw new Error(`push kid_state: ${error.message}`);
+    }
   }
   return n;
 }
@@ -196,18 +200,20 @@ async function pullChanges(): Promise<number> {
     n++;
   }
 
-  // Anjali's rung: take the remote value when it's newer (last-write-wins).
-  const { data: state } = await client
-    .from('kid_state')
-    .select('anjali_level, updated_at')
-    .eq('kid', 'anjali')
-    .maybeSingle();
-  if (state) {
-    const remoteTs = Date.parse(state.updated_at as string);
-    const localTs = await getMeta<number>('beekeeper.levelUpdatedAt.anjali', 0);
-    if (remoteTs > localTs) {
-      await setMeta('beekeeper.level.anjali', state.anjali_level as number);
-      await setMeta('beekeeper.levelUpdatedAt.anjali', remoteTs);
+  // Each kid's rung: take the remote value when it's newer (last-write-wins).
+  for (const kid of ['arya', 'anjali'] as const) {
+    const { data: state } = await client
+      .from('kid_state')
+      .select('anjali_level, updated_at')
+      .eq('kid', kid)
+      .maybeSingle();
+    if (state) {
+      const remoteTs = Date.parse(state.updated_at as string);
+      const localTs = await getMeta<number>(`beekeeper.levelUpdatedAt.${kid}`, 0);
+      if (remoteTs > localTs) {
+        await setMeta(`beekeeper.level.${kid}`, state.anjali_level as number);
+        await setMeta(`beekeeper.levelUpdatedAt.${kid}`, remoteTs);
+      }
     }
   }
   return n;

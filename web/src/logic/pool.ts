@@ -2,34 +2,43 @@
  * Pure adaptive word-pool logic for kids mode. No storage, no UI — every
  * function here is unit-testable.
  *
- * Ported from Swift's `KidsWordPool` enum (KidsMode.swift). Behavior is
- * kept identical, including edge cases:
- * - Anjali climbs rungs 0→3; Arya always practices the whole list.
- * - "Seen" state comes only from the kid's own GradeEvents (per-kid
- *   isolation); the shared WordRecord counters are never consulted here.
- * - Rungs only move up, never down; struggling blends easier words instead.
+ * Shared 5-rung difficulty ladder (both kids):
+ *   0 = One Bee, ≤5 letters (easiest start)
+ *   1 = One Bee, ≤7 letters
+ *   2 = all One Bee
+ *   3 = Two Bee
+ *   4 = Three Bee
+ *
+ * Each kid starts at their age-expected rung (Anjali 0, Arya 2) and the
+ * rung adapts to rolling accuracy: ≥80% over ≥10 recent answers moves up,
+ * <50% moves down. Within a round, struggling blends easier words
+ * (comfort) and doing-well-but-not-promoted blends harder words (stretch),
+ * so difficulty always nudges gently upward.
+ *
+ * "Seen" state comes only from the kid's own GradeEvents (per-kid
+ * isolation); the shared WordRecord counters are never consulted here.
  */
 
 import { KidsPolicy } from './policy';
 import { tierFromRaw } from './types';
 import type { GradeEvent, KidProfile, WordRecord } from './types';
 
-/** Anjali's top rung: 0 = short One Bee → 1 = all One Bee → 2 = Two Bee → 3 = Three Bee. */
-export const maxAnjaliLevel = 3;
+/** Top rung of the shared ladder. */
+export const maxLevel = KidsPolicy.maxLevel;
 
 /**
- * Whether a word belongs to a rung of the ladder for a kid.
- * Arya always practices the whole list at once.
+ * Whether a word belongs to a rung of the ladder.
  */
-export function matches(record: WordRecord, level: number, kid: KidProfile): boolean {
-  if (kid === 'arya') return true;
+export function matches(record: WordRecord, level: number, _kid: KidProfile): boolean {
   const tier = tierFromRaw(record.tierRaw);
   switch (level) {
     case 0:
-      return tier === 'oneBee' && record.spelling.length <= KidsPolicy.anjaliShortWordMaxLength;
+      return tier === 'oneBee' && record.spelling.length <= KidsPolicy.easiestWordMaxLength;
     case 1:
-      return tier === 'oneBee';
+      return tier === 'oneBee' && record.spelling.length <= KidsPolicy.anjaliShortWordMaxLength;
     case 2:
+      return tier === 'oneBee';
+    case 3:
       return tier === 'twoBee';
     default:
       return tier === 'threeBee';
@@ -75,27 +84,32 @@ export function seenCounts(events: GradeEvent[], kid: KidProfile): Record<string
 }
 
 /**
- * Resolve the persisted rung against performance. Promotes on mastery
- * (≥80% over ≥10 recent answers at the rung) or when the rung's pool is
- * exhausted (every word seen at least once by this kid). Rungs never
- * move down; struggling blends easier words via comfortMixing instead.
+ * Resolve the persisted rung against performance, for both kids.
+ * Promotes on mastery (≥80% over ≥10 recent answers at the rung),
+ * demotes on struggle (<50% over ≥10), or promotes when the rung's pool
+ * is exhausted (every word seen at least once by this kid).
  */
 export function resolvedLevel(
-  stored: number,
+  stored: number | null | undefined,
   kid: KidProfile,
   events: GradeEvent[],
   records: WordRecord[],
 ): number {
-  if (kid !== 'anjali') return 0;
-  let level = Math.min(Math.max(stored, 0), maxAnjaliLevel);
-  if (level >= maxAnjaliLevel) return level;
+  const start = KidsPolicy.startLevel[kid] ?? 0;
+  let level = stored == null ? start : Math.min(Math.max(stored, 0), maxLevel);
   const { answered, accuracy } = recentAccuracy(events, kid, records, level);
-  const mastered =
-    answered >= KidsPolicy.promoteMinAnswers && accuracy >= KidsPolicy.promoteAccuracy;
+  if (answered >= KidsPolicy.promoteMinAnswers) {
+    if (accuracy >= KidsPolicy.promoteAccuracy) {
+      return Math.min(maxLevel, level + 1);
+    }
+    if (accuracy < KidsPolicy.struggleAccuracy) {
+      return Math.max(0, level - 1);
+    }
+  }
   const pool = records.filter((r) => matches(r, level, kid));
   const seenByKid = new Set(events.filter((e) => e.kid === kid).map((e) => e.wordID));
   const exhausted = pool.length > 0 && pool.every((r) => seenByKid.has(r.wordID));
-  if (mastered || exhausted) level += 1;
+  if (exhausted) return Math.min(maxLevel, level + 1);
   return level;
 }
 
@@ -109,9 +123,28 @@ export function comfortMixing(
   records: WordRecord[],
   level: number,
 ): boolean {
-  if (kid !== 'anjali' || level <= 0) return false;
+  if (level <= 0) return false;
   const { answered, accuracy } = recentAccuracy(events, kid, records, level);
   return answered >= KidsPolicy.promoteMinAnswers && accuracy < KidsPolicy.struggleAccuracy;
+}
+
+/**
+ * True when the kid is doing well but hasn't earned promotion yet: blend
+ * in a few words from the next rung — the gentle upward push.
+ */
+export function stretchMixing(
+  events: GradeEvent[],
+  kid: KidProfile,
+  records: WordRecord[],
+  level: number,
+): boolean {
+  if (level >= maxLevel) return false;
+  const { answered, accuracy } = recentAccuracy(events, kid, records, level);
+  return (
+    answered >= KidsPolicy.promoteMinAnswers &&
+    accuracy >= KidsPolicy.stretchAccuracy &&
+    accuracy < KidsPolicy.promoteAccuracy
+  );
 }
 
 /**
@@ -130,12 +163,15 @@ export function nextWord(
   kid: KidProfile,
   level: number,
   comfortMixingFlag: boolean,
+  stretchMixingFlag: boolean,
   practiced: Set<string>,
   rng: () => number = Math.random,
 ): WordRecord | null {
   let rung = level;
   if (comfortMixingFlag && rung > 0 && rng() < KidsPolicy.comfortMixRatio) {
     rung -= 1;
+  } else if (stretchMixingFlag && rung < maxLevel && rng() < KidsPolicy.stretchMixRatio) {
+    rung += 1;
   }
   const pool = records.filter((r) => matches(r, rung, kid) && !practiced.has(r.wordID));
   if (pool.length === 0) return null;
