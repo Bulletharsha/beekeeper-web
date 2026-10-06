@@ -39,6 +39,13 @@ export function setVoice(v: GroqVoiceId): void {
   localStorage.setItem(VOICE_KEY, v);
 }
 
+/** Preview a Groq voice (Parents voice picker): selects it and speaks a
+ *  sample hint so you can judge clarity. Tapping a voice IS selecting it. */
+export function previewVoice(v: GroqVoiceId): void {
+  setVoice(v);
+  speakText('The meaning of the word abaft is: toward the back of a ship.', false, 1.0);
+}
+
 let currentAudio: HTMLAudioElement | null = null;
 
 function stopCurrent(): void {

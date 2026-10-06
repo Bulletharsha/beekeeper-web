@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, isCloudConfigured } from '../lib/supabase';
 import { syncNow, pendingCount, lastSyncAt } from '../lib/sync';
+import { GROQ_VOICES, getVoice, previewVoice, type GroqVoiceId } from '../audio/player';
 
 interface Props {
   session: Session | null;
@@ -20,6 +21,12 @@ export default function ParentsHome({ session, onBack }: Props) {
   const [status, setStatus] = useState('');
   const [pending, setPending] = useState(0);
   const [lastSync, setLastSync] = useState<number | null>(null);
+  const [voice, setVoiceState] = useState<GroqVoiceId>(() => getVoice());
+
+  function pickVoice(v: GroqVoiceId) {
+    setVoiceState(v);
+    previewVoice(v);
+  }
 
   useEffect(() => {
     if (session) {
@@ -69,6 +76,22 @@ export default function ParentsHome({ session, onBack }: Props) {
         ← Back
       </button>
       <h2>Parents</h2>
+
+      <div className="card">
+        <h3>Narration voice</h3>
+        <p>Tap a voice to hear it — that's the one the kids will get.</p>
+        <div className="quiz-actions">
+          {GROQ_VOICES.map((v) => (
+            <button
+              key={v.id}
+              className={voice === v.id ? 'primary' : 'secondary'}
+              onClick={() => pickVoice(v.id)}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {!isCloudConfigured ? (
         <p>Cloud sync isn't configured in this build — the app works fully offline.</p>
