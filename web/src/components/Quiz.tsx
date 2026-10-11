@@ -83,17 +83,22 @@ export default function Quiz({ profile, onExit, resume }: Props) {
 
       // Load persisted adaptive state before the engine is built, so the
       // callbacks close over live mutable values — no patching needed.
-      // Level schema v2: the shared 5-rung ladder replaced Anjali's old
-      // 4-rung one; reset stored rungs to each kid's start level once.
+      // Level schema v3: the shared 6-rung ladder added the foundations
+      // rung at the bottom (rung 0) and shifted every bee rung up by one.
+      // Migrate once per kid: Anjali restarts on the foundations rung;
+      // Arya keeps her bee-rung progress, shifted up by one.
       const levelSchema = await getMeta<number>('beekeeper.levelSchema', 1);
       let currentLevel: number =
         (await getMeta<number | null>(`beekeeper.level.${profile}`, null)) ??
         KidsPolicy.startLevel[profile] ??
         0;
-      if (levelSchema < 2) {
-        currentLevel = KidsPolicy.startLevel[profile] ?? 0;
+      if (levelSchema < 3) {
+        currentLevel =
+          profile === 'anjali'
+            ? 0
+            : Math.min(currentLevel + 1, KidsPolicy.maxLevel);
         await setMeta(`beekeeper.level.${profile}`, currentLevel);
-        await setMeta('beekeeper.levelSchema', 2);
+        await setMeta('beekeeper.levelSchema', 3);
       }
       let sessionNumber = await getMeta<number>(`beekeeper.session.${profile}`, 0);
 

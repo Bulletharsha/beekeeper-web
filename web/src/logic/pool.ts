@@ -2,18 +2,21 @@
  * Pure adaptive word-pool logic for kids mode. No storage, no UI — every
  * function here is unit-testable.
  *
- * Shared 5-rung difficulty ladder (both kids):
- *   0 = One Bee, ≤5 letters (easiest start)
- *   1 = One Bee, ≤7 letters
- *   2 = all One Bee
- *   3 = Two Bee
- *   4 = Three Bee
+ * Shared 6-rung difficulty ladder (both kids):
+ *   0 = Foundations: simple phonetic/common words (pre-bee, easiest start)
+ *   1 = One Bee, ≤5 letters
+ *   2 = One Bee, ≤7 letters
+ *   3 = all One Bee
+ *   4 = Two Bee
+ *   5 = Three Bee
  *
- * Each kid starts at their age-expected rung (Anjali 0, Arya 2) and the
+ * Each kid starts at their age-expected rung (Anjali 0, Arya 3) and the
  * rung adapts to rolling accuracy: ≥80% over ≥10 recent answers moves up,
  * <50% moves down. Within a round, struggling blends easier words
  * (comfort) and doing-well-but-not-promoted blends harder words (stretch),
- * so difficulty always nudges gently upward.
+ * so difficulty always nudges gently upward — except at rung 0, where
+ * stretching is disabled: the foundations rung is for building confidence,
+ * not for pushing.
  *
  * "Seen" state comes only from the kid's own GradeEvents (per-kid
  * isolation); the shared WordRecord counters are never consulted here.
@@ -33,12 +36,14 @@ export function matches(record: WordRecord, level: number, _kid: KidProfile): bo
   const tier = tierFromRaw(record.tierRaw);
   switch (level) {
     case 0:
-      return tier === 'oneBee' && record.spelling.length <= KidsPolicy.easiestWordMaxLength;
+      return tier === 'foundations';
     case 1:
-      return tier === 'oneBee' && record.spelling.length <= KidsPolicy.anjaliShortWordMaxLength;
+      return tier === 'oneBee' && record.spelling.length <= KidsPolicy.easiestWordMaxLength;
     case 2:
-      return tier === 'oneBee';
+      return tier === 'oneBee' && record.spelling.length <= KidsPolicy.anjaliShortWordMaxLength;
     case 3:
+      return tier === 'oneBee';
+    case 4:
       return tier === 'twoBee';
     default:
       return tier === 'threeBee';
@@ -131,6 +136,10 @@ export function comfortMixing(
 /**
  * True when the kid is doing well but hasn't earned promotion yet: blend
  * in a few words from the next rung — the gentle upward push.
+ *
+ * Never stretches from rung 0: the foundations rung is for building
+ * confidence, and its words are already the easiest available. A kid
+ * doing well there promotes to rung 1 instead.
  */
 export function stretchMixing(
   events: GradeEvent[],
@@ -138,7 +147,7 @@ export function stretchMixing(
   records: WordRecord[],
   level: number,
 ): boolean {
-  if (level >= maxLevel) return false;
+  if (level <= 0 || level >= maxLevel) return false;
   const { answered, accuracy } = recentAccuracy(events, kid, records, level);
   return (
     answered >= KidsPolicy.promoteMinAnswers &&

@@ -9,8 +9,8 @@
 /** Which child is practicing. Parents mode is the absence of a kid. */
 export type KidProfile = 'arya' | 'anjali';
 
-/** Spelling-bee difficulty tier. */
-export type WordTier = 'oneBee' | 'twoBee' | 'threeBee';
+/** Spelling-bee difficulty tier, plus the pre-bee foundations rung for young beginners. */
+export type WordTier = 'foundations' | 'oneBee' | 'twoBee' | 'threeBee';
 
 /**
  * A word from the 2027 Words of the Champions list, fully enriched.
@@ -77,10 +77,12 @@ export interface KidRound {
 
 /**
  * Map a raw tier string from the dataset to a {@link WordTier}.
- * Unknown values fall back to 'oneBee' (the easiest rung).
+ * Unknown values fall back to 'oneBee' (the easiest bee rung).
  */
 export function tierFromRaw(tierRaw: string): WordTier {
   switch (tierRaw) {
+    case 'foundations':
+      return 'foundations';
     case 'two_bee':
     case 'twoBee':
       return 'twoBee';

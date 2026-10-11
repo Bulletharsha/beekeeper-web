@@ -8,7 +8,7 @@ import Dexie, { type Table } from 'dexie';
 export interface WordRow {
   id: string; // stable word id
   spelling: string;
-  tier: 'oneBee' | 'twoBee' | 'threeBee';
+  tier: 'foundations' | 'oneBee' | 'twoBee' | 'threeBee';
   definition: string;
   example: string;
   languageOrigin: string;
@@ -101,8 +101,11 @@ export async function setMeta(key: string, value: unknown): Promise<void> {
 /** Seed the words table from the bundled JSON on first run, and make sure
  *  every word has a WordRecord so the first round has candidates. */
 export async function ensureWordsSeeded(): Promise<void> {
+  // 4000 spelling-bee words + 129 foundations words (simple phonetic words
+  // for young beginners). Keep in sync with public/data/words.json.
+  const EXPECTED_WORD_COUNT = 4129;
   const count = await db.words.count();
-  if (count < 4000) {
+  if (count < EXPECTED_WORD_COUNT) {
     // BASE_URL-aware: the app may be served from a subpath (e.g. Pages).
     const res = await fetch(`${import.meta.env.BASE_URL}data/words.json`);
     if (!res.ok) throw new Error(`words.json fetch failed: ${res.status}`);
@@ -111,7 +114,13 @@ export async function ensureWordsSeeded(): Promise<void> {
       id: w.id,
       spelling: w.spelling,
       tier:
-        w.tier === 'one_bee' ? 'oneBee' : w.tier === 'two_bee' ? 'twoBee' : 'threeBee',
+        w.tier === 'foundations'
+          ? 'foundations'
+          : w.tier === 'one_bee'
+            ? 'oneBee'
+            : w.tier === 'two_bee'
+              ? 'twoBee'
+              : 'threeBee',
       definition: w.definition ?? '',
       example: w.example ?? '',
       languageOrigin: w.languageOrigin ?? '',
@@ -123,7 +132,7 @@ export async function ensureWordsSeeded(): Promise<void> {
   // One WordRecord per word (all unseen). The adaptive pool draws its
   // candidates from these, so a fresh install must have them.
   const recordCount = await db.wordRecords.count();
-  if (recordCount < 4000) {
+  if (recordCount < EXPECTED_WORD_COUNT) {
     const words = await db.words.toArray();
     const existing = new Set(await db.wordRecords.toCollection().primaryKeys());
     const missing: WordRecordRow[] = words
