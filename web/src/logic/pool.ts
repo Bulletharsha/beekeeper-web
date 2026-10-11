@@ -157,10 +157,32 @@ export function stretchMixing(
 }
 
 /**
+ * Spelling rules from this kid's recent misses (learning mode). The pool
+ * uses these to reinforce shaky patterns with more words of the same kind.
+ */
+export function recentMissRules(
+  events: GradeEvent[],
+  kid: KidProfile,
+  records: WordRecord[],
+  window: number = KidsPolicy.recentWindow,
+): Set<string> {
+  const byID = new Map(records.map((r) => [r.wordID, r] as const));
+  const rules = new Set<string>();
+  const misses = events.filter((e) => e.kid === kid && !e.correct).slice(-window);
+  for (const e of misses) {
+    const rule = byID.get(e.wordID)?.rule;
+    if (rule) rules.add(rule);
+  }
+  return rules;
+}
+
+/**
  * Pick the next word: words this kid hasn't seen first, then least-seen
  * by this kid; never repeats a word already practiced this round.
  * Seen-ness comes from this kid's own GradeEvents — the shared counters
  * must not leak one kid's (or the parents') practice into another's pool.
+ * When `reinforceRules` is non-empty, some picks favor words sharing a
+ * recently-missed rule, so the kid practices the pattern, not just the word.
  * Returns null when the pool is dry.
  *
  * @param rng Uniform random in [0, 1). Defaults to Math.random; pass a
@@ -175,6 +197,7 @@ export function nextWord(
   stretchMixingFlag: boolean,
   practiced: Set<string>,
   rng: () => number = Math.random,
+  reinforceRules: Set<string> = new Set(),
 ): WordRecord | null {
   let rung = level;
   if (comfortMixingFlag && rung > 0 && rng() < KidsPolicy.comfortMixRatio) {
@@ -182,7 +205,12 @@ export function nextWord(
   } else if (stretchMixingFlag && rung < maxLevel && rng() < KidsPolicy.stretchMixRatio) {
     rung += 1;
   }
-  const pool = records.filter((r) => matches(r, rung, kid) && !practiced.has(r.wordID));
+  let pool = records.filter((r) => matches(r, rung, kid) && !practiced.has(r.wordID));
+  // Learning-mode reinforcement: lean into recently-missed patterns.
+  if (reinforceRules.size > 0 && rng() < KidsPolicy.ruleReinforceRatio) {
+    const rulePool = pool.filter((r) => r.rule !== undefined && reinforceRules.has(r.rule));
+    if (rulePool.length > 0) pool = rulePool;
+  }
   if (pool.length === 0) return null;
   const seen = seenCounts(events, kid);
   const unseen = pool.filter((r) => (seen[r.wordID] ?? 0) === 0);

@@ -13,6 +13,29 @@ export type KidProfile = 'arya' | 'anjali';
 export type WordTier = 'foundations' | 'oneBee' | 'twoBee' | 'threeBee';
 
 /**
+ * Spelling rule taught when a foundations word is missed. Each rule is one
+ * short spoken sentence — the transferable lesson behind the word, so the
+ * kid learns the pattern, not just the answer.
+ */
+export type RuleID =
+  | 'short-vowel'
+  | 'vowel-name'
+  | 'blend'
+  | 'digraph'
+  | 'r-controlled'
+  | 'sight-word';
+
+/** Kid-friendly one-sentence explanation per rule, spoken on a miss. */
+export const RULES: Record<RuleID, string> = {
+  'short-vowel': 'In short words like this, the vowel makes its short sound.',
+  'vowel-name': 'In this word, the vowel says its own name.',
+  blend: 'Slide those beginning sounds together.',
+  digraph: 'Those two letters team up to make one new sound.',
+  'r-controlled': 'The r takes over the vowel’s sound in this word.',
+  'sight-word': 'This one’s a sight word — we just memorize how it looks.',
+};
+
+/**
  * A word from the 2027 Words of the Champions list, fully enriched.
  * Ported from Swift's `WordEntry`.
  */
@@ -27,6 +50,8 @@ export interface WordEntry {
   partOfSpeech: string;
   /** Official Scripps pronunciation MP3, when available. */
   audioUrl?: string;
+  /** Spelling rule for foundations words (learning mode). */
+  rule?: RuleID;
 }
 
 /**
@@ -38,6 +63,8 @@ export interface WordRecord {
   spelling: string;
   /** Raw tier string from the dataset, e.g. "one_bee". See {@link tierFromRaw}. */
   tierRaw: string;
+  /** Spelling rule id for foundations words (learning mode). */
+  rule?: string;
   lastGradedSession?: number;
   lastCorrect?: boolean;
   timesSeen: number;

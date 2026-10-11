@@ -14,12 +14,16 @@ export interface WordRow {
   languageOrigin: string;
   partOfSpeech: string;
   audioUrl?: string;
+  /** Spelling rule id for foundations words (learning mode). */
+  rule?: string;
 }
 
 export interface WordRecordRow {
   wordID: string; // primary key
   spelling: string;
   tierRaw: string;
+  /** Spelling rule id for foundations words (learning mode). */
+  rule?: string;
   lastGradedSession?: number;
   lastCorrect?: boolean;
   timesSeen: number;
@@ -126,6 +130,7 @@ export async function ensureWordsSeeded(): Promise<void> {
       languageOrigin: w.languageOrigin ?? '',
       partOfSpeech: w.partOfSpeech ?? '',
       audioUrl: w.audioURL ?? undefined,
+      rule: w.rule ?? undefined,
     }));
     await db.words.bulkPut(words);
   }
@@ -141,11 +146,33 @@ export async function ensureWordsSeeded(): Promise<void> {
         wordID: w.id,
         spelling: w.spelling,
         tierRaw: w.tier,
+        rule: w.rule,
         timesSeen: 0,
         correctCount: 0,
         wrongCount: 0,
       }));
     if (missing.length > 0) await db.wordRecords.bulkAdd(missing);
+  }
+  // Backfill spelling rules for foundations words seeded before rules
+  // existed (schema v3 devices). Cheap: only touches rule-less rows.
+  const ruleless = await db.words.where('tier').equals('foundations').toArray();
+  const needsRule = ruleless.filter((w) => !w.rule);
+  if (needsRule.length > 0) {
+    const res = await fetch(`${import.meta.env.BASE_URL}data/words.json`);
+    if (res.ok) {
+      const data = await res.json();
+      const byID = new Map((data.words as any[]).map((w) => [w.id, w.rule]));
+      const wordUpdates = needsRule
+        .filter((w) => byID.get(w.id))
+        .map((w) => ({ ...w, rule: byID.get(w.id) as string }));
+      if (wordUpdates.length > 0) await db.words.bulkPut(wordUpdates);
+      const recUpdates = (
+        await db.wordRecords.where('wordID').anyOf(wordUpdates.map((w) => w.id)).toArray()
+      )
+        .filter((r) => !r.rule)
+        .map((r) => ({ ...r, rule: byID.get(r.wordID) as string }));
+      if (recUpdates.length > 0) await db.wordRecords.bulkPut(recUpdates);
+    }
   }
 }
 

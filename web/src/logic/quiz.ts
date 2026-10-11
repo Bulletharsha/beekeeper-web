@@ -20,8 +20,9 @@
  */
 
 import { isCorrect, spelledAloud } from './grading';
-import { comfortMixing, nextWord, resolvedLevel, stretchMixing } from './pool';
+import { comfortMixing, nextWord, recentMissRules, resolvedLevel, stretchMixing } from './pool';
 import { KidsPolicy, starsFor } from './policy';
+import { RULES } from './types';
 import type { GradeEvent, KidProfile, WordEntry, WordRecord } from './types';
 
 /** Engine stages. `feedback` is shown after each graded answer. */
@@ -163,12 +164,14 @@ export class QuizEngine {
     this.callbacks.setStoredLevel(level);
     const comfort = comfortMixing(events, this.profile, records, level);
     const stretch = stretchMixing(events, this.profile, records, level);
+    // Learning mode: reinforce spelling rules missed recently.
+    const missRules = recentMissRules(events, this.profile, records);
 
     const byID = new Map(this.wordEntries.map((e) => [e.id, e] as const));
     const practiced = new Set<string>();
     const queue: WordEntry[] = [];
     for (let i = 0; i < KidsPolicy.roundSize; i++) {
-      const record = nextWord(records, events, this.profile, level, comfort, stretch, practiced, this.rng);
+      const record = nextWord(records, events, this.profile, level, comfort, stretch, practiced, this.rng, missRules);
       if (!record) break;
       practiced.add(record.wordID);
       const entry = byID.get(record.wordID);
@@ -280,8 +283,13 @@ export class QuizEngine {
         true,
       );
     } else {
+      // Learning mode: teach the spelling rule behind the word, not just
+      // the answer — the rule transfers to every word like it.
+      const rule = entry.rule ? RULES[entry.rule] : null;
       this.callbacks.speakText(
-        `${this.pick(GENTLE_PHRASES)} The correct spelling is: ${spelledAloud(entry.spelling)}`,
+        rule
+          ? `${this.pick(GENTLE_PHRASES)} ${rule} The correct spelling is: ${spelledAloud(entry.spelling)}`
+          : `${this.pick(GENTLE_PHRASES)} The correct spelling is: ${spelledAloud(entry.spelling)}`,
       );
     }
     this.answer = '';

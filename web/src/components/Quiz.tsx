@@ -24,6 +24,7 @@ function toEntry(w: WordRow): WordEntry {
     languageOrigin: w.languageOrigin,
     partOfSpeech: w.partOfSpeech,
     audioUrl: w.audioUrl,
+    rule: w.rule as WordEntry['rule'],
   };
 }
 
@@ -67,6 +68,7 @@ export default function Quiz({ profile, onExit, resume }: Props) {
         wordID: r.wordID,
         spelling: r.spelling,
         tierRaw: r.tierRaw,
+        rule: r.rule,
         lastGradedSession: r.lastGradedSession,
         lastCorrect: r.lastCorrect,
         timesSeen: r.timesSeen,
@@ -140,6 +142,7 @@ export default function Quiz({ profile, onExit, resume }: Props) {
               wordID,
               spelling: entry.spelling,
               tierRaw: entry.tier,
+              rule: entry.rule,
               timesSeen: 1,
               correctCount: correct ? 1 : 0,
               wrongCount: correct ? 0 : 1,
@@ -150,6 +153,7 @@ export default function Quiz({ profile, onExit, resume }: Props) {
               wordID,
               spelling: entry.spelling,
               tierRaw: entry.tier,
+              rule: entry.rule,
               timesSeen: 1,
               correctCount: correct ? 1 : 0,
               wrongCount: correct ? 0 : 1,

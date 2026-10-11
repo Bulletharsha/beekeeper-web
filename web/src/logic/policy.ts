@@ -39,6 +39,12 @@ export const KidsPolicy = {
   comfortMixRatio: 0.4,
   /** Share of picks drawn from the next (harder) rung while stretching. */
   stretchMixRatio: 0.25,
+  /**
+   * Share of picks drawn from words sharing a recently-missed spelling
+   * rule (learning-mode reinforcement): after missing a silent-e word,
+   * the pool leans toward more silent-e words so the pattern sticks.
+   */
+  ruleReinforceRatio: 0.3,
   /** Parent gate PIN length. */
   pinLength: 4,
 } as const;
