@@ -283,12 +283,16 @@ export class QuizEngine {
         true,
       );
     } else {
-      // Learning mode: teach the spelling rule behind the word, not just
-      // the answer — the rule transfers to every word like it.
+      // Learning mode: teach the transferable lesson behind the word, not
+      // just the answer. Foundations words teach their spelling rule;
+      // bee words teach their language of origin — at that level,
+      // etymology is the pattern that unlocks families of words.
       const rule = entry.rule ? RULES[entry.rule] : null;
+      const origin = !rule && entry.languageOrigin ? entry.languageOrigin : null;
+      const lesson = rule ?? (origin ? `This word comes from ${origin}.` : null);
       this.callbacks.speakText(
-        rule
-          ? `${this.pick(GENTLE_PHRASES)} ${rule} The correct spelling is: ${spelledAloud(entry.spelling)}`
+        lesson
+          ? `${this.pick(GENTLE_PHRASES)} ${lesson} The correct spelling is: ${spelledAloud(entry.spelling)}`
           : `${this.pick(GENTLE_PHRASES)} The correct spelling is: ${spelledAloud(entry.spelling)}`,
       );
     }

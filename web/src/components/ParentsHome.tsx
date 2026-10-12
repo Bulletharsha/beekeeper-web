@@ -3,6 +3,26 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase, isCloudConfigured } from '../lib/supabase';
 import { syncNow, pendingCount, lastSyncAt } from '../lib/sync';
 import { GROQ_VOICES, getVoice, previewVoice, type GroqVoiceId } from '../audio/player';
+import { RULES, type RuleID } from '../logic/types';
+
+/** Example words per rule, so parents can reinforce at the dinner table. */
+const RULE_EXAMPLES: Record<RuleID, string> = {
+  'short-vowel': 'cat, dog, sun, map',
+  'vowel-name': 'cake, bike, home, like',
+  blend: 'frog, flag, jump, swim',
+  digraph: 'that, this, with, where',
+  'r-controlled': 'star, park',
+  'sight-word': 'the, you, said, have',
+};
+
+const RULE_ORDER: RuleID[] = [
+  'short-vowel',
+  'vowel-name',
+  'blend',
+  'digraph',
+  'r-controlled',
+  'sight-word',
+];
 
 interface Props {
   session: Session | null;
@@ -91,6 +111,24 @@ export default function ParentsHome({ session, onBack }: Props) {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="card">
+        <h3>What Anjali is learning</h3>
+        <p>
+          When she misses a word, the app teaches the spelling rule behind
+          it — not just the answer. These are the six rules; her word picker
+          also leans into rules she's missed recently.
+        </p>
+        <ul>
+          {RULE_ORDER.map((r) => (
+            <li key={r}>
+              <strong>{RULES[r]}</strong>
+              <br />
+              <span>e.g. {RULE_EXAMPLES[r]}</span>
+            </li>
+          ))}
+        </ul>
       </div>
 
       {!isCloudConfigured ? (
