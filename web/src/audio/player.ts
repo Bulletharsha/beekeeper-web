@@ -76,7 +76,10 @@ function minDurationSec(text: string): number {
   return Math.max(1.5, text.length * 0.05);
 }
 
-/** Parse an audio blob's duration in seconds via metadata; null on failure. */
+/** Parse an audio blob's duration in seconds via metadata; null on failure.
+ *  Also rejects blobs whose size doesn't match the WAV header — a truncated
+ *  download keeps the original header (full duration) with partial audio,
+ *  so duration alone can't catch it. */
 function audioDurationSec(url: string): Promise<number | null> {
   return new Promise((resolve) => {
     const audio = new Audio(url);
@@ -87,6 +90,19 @@ function audioDurationSec(url: string): Promise<number | null> {
     audio.addEventListener('error', () => done(null), { once: true });
     setTimeout(() => done(null), 5000);
   });
+}
+
+/** True when a WAV blob's size matches its RIFF header's declared size. */
+async function wavSizeOk(blob: Blob): Promise<boolean> {
+  try {
+    const buf = await blob.slice(0, 44).arrayBuffer();
+    const v = new DataView(buf);
+    if (v.getUint32(0) !== 0x52494646) return false;
+    const declared = v.getUint32(4, true) + 8;
+    return blob.size >= declared - 1024;
+  } catch {
+    return false;
+  }
 }
 
 function stopCurrent(): void {
@@ -195,13 +211,18 @@ async function fetchGroqNarration(
       const blob = await res.blob();
       if (isStale()) return;
       const url = URL.createObjectURL(blob);
-      const dur = await audioDurationSec(url);
+      // Two truncation checks: (1) blob size vs WAV header — catches a
+      // dropped stream that kept the original header; (2) duration vs
+      // text length — catches a complete-but-too-short render.
+      const sizeOk = await wavSizeOk(blob);
+      const dur = sizeOk ? await audioDurationSec(url) : null;
       const minDur = minDurationSec(text);
-      if (dur !== null && dur < minDur) {
+      const truncated = !sizeOk || (dur !== null && dur < minDur);
+      if (truncated) {
         URL.revokeObjectURL(url);
-        // Truncated audio — retry once, then fall back to system speech.
+        // Retry once, then fall back to system speech.
         if (attempt === 0) continue;
-        throw new Error(`tts truncated (${dur.toFixed(1)}s < ${minDur.toFixed(1)}s)`);
+        throw new Error('tts truncated');
       }
       ttsCache.set(key, url);
       if (isStale()) {

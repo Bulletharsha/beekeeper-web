@@ -24,6 +24,16 @@ const CORS = {
 };
 
 
+// True when a WAV ArrayBuffer's actual length matches its RIFF header's
+// declared size. A dropped stream leaves a valid header with partial PCM.
+function isWavComplete(buf: ArrayBuffer): boolean {
+  if (buf.byteLength < 44) return false;
+  const v = new DataView(buf);
+  if (v.getUint32(0) !== 0x52494646) return false; // "RIFF"
+  const declared = v.getUint32(4, true) + 8;
+  return buf.byteLength >= declared - 1024; // 1KB tolerance
+}
+
 // In-memory per-user rate limiter (per isolate; fine for our volume).
 const hits = new Map<string, number[]>();
 function rateLimited(userId: string): boolean {
@@ -87,7 +97,38 @@ serve(async (req) => {
     return new Response('tts provider error', { status: 502, headers: CORS });
   }
 
-  const audio = await groqRes.arrayBuffer();
+  // Validate the WAV isn't truncated: the RIFF header declares the full
+  // size, but a dropped stream leaves partial PCM data behind it. A
+  // truncated file plays short — the "skips the last letters" bug.
+  // Retry Groq once before giving up.
+  const fetchGroq = () =>
+    fetch(GROQ_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: GROQ_MODEL, input, voice, response_format: 'wav', speed: ttsSpeed }),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`groq ${r.status}`);
+      return r.arrayBuffer();
+    });
+  let audio: ArrayBuffer | null = null;
+  // Attempt 0 reuses the already-fetched response; attempt 1 refetches.
+  const first = await groqRes.arrayBuffer();
+  if (isWavComplete(first)) {
+    audio = first;
+  } else {
+    console.error('groq truncated wav, retrying', first.byteLength);
+    try {
+      const second = await fetchGroq();
+      if (isWavComplete(second)) audio = second;
+      else console.error('groq truncated wav twice', second.byteLength);
+    } catch (e) {
+      console.error('groq retry failed', e);
+    }
+  }
+  if (!audio) return new Response('tts provider error', { status: 502, headers: CORS });
   return new Response(audio, {
     headers: {
       ...CORS,
