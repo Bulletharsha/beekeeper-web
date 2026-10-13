@@ -19,9 +19,11 @@ export function isCorrect(answer: string, spelling: string): boolean {
 }
 
 /**
- * "abaft" → "A. B. A. F. T." — speech synthesis reads single capital
+ * "abaft" → "A. B. A. F. T" — speech synthesis reads single capital
  * letters as letter names, which is what a bee judge sounds like.
+ * No trailing period: some TTS engines clip or swallow final punctuation,
+ * which reads as "skipping the last letter".
  */
 export function spelledAloud(spelling: string): string {
-  return spelling.toUpperCase().split('').join('. ') + '.';
+  return spelling.toUpperCase().split('').join('. ');
 }

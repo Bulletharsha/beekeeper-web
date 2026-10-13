@@ -76,22 +76,17 @@ function minDurationSec(text: string): number {
   return Math.max(1.5, text.length * 0.05);
 }
 
-/** Parse a WAV blob's duration in seconds; null when unparseable. */
-async function wavDurationSec(blob: Blob): Promise<number | null> {
-  try {
-    const buf = await blob.slice(0, 44).arrayBuffer();
-    const v = new DataView(buf);
-    if (v.getUint32(0) !== 0x52494646) return null; // "RIFF"
-    const sampleRate = v.getUint32(24, true);
-    const byteRate = v.getUint32(28, true);
-    const dataSize = v.getUint32(40, true);
-    if (!sampleRate || !byteRate) return null;
-    // dataSize 0xFFFFFFFF = streaming/unknown length; fall back to blob size.
-    const bytes = dataSize === 0xffffffff ? blob.size - 44 : dataSize;
-    return bytes / byteRate;
-  } catch {
-    return null;
-  }
+/** Parse an audio blob's duration in seconds via metadata; null on failure. */
+function audioDurationSec(url: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const audio = new Audio(url);
+    const done = (d: number | null) => resolve(d);
+    audio.addEventListener('loadedmetadata', () => {
+      done(Number.isFinite(audio.duration) ? audio.duration : null);
+    }, { once: true });
+    audio.addEventListener('error', () => done(null), { once: true });
+    setTimeout(() => done(null), 5000);
+  });
 }
 
 function stopCurrent(): void {
@@ -199,16 +194,20 @@ async function fetchGroqNarration(
       }
       const blob = await res.blob();
       if (isStale()) return;
-      const dur = await wavDurationSec(blob);
+      const url = URL.createObjectURL(blob);
+      const dur = await audioDurationSec(url);
       const minDur = minDurationSec(text);
       if (dur !== null && dur < minDur) {
+        URL.revokeObjectURL(url);
         // Truncated audio — retry once, then fall back to system speech.
         if (attempt === 0) continue;
         throw new Error(`tts truncated (${dur.toFixed(1)}s < ${minDur.toFixed(1)}s)`);
       }
-      const url = URL.createObjectURL(blob);
       ttsCache.set(key, url);
-      if (isStale()) return;
+      if (isStale()) {
+        URL.revokeObjectURL(url);
+        return;
+      }
       const audio = new Audio(url);
       currentAudio = audio;
       await audio.play().catch(() => speakWithFallback(text, rate));
@@ -258,9 +257,10 @@ function speakWithFallback(text: string, rate = 0.95): void {
   if (synth.paused) synth.resume();
 }
 
-/** Spell a word aloud letter by letter: "A. B. A. F. T." */
+/** Spell a word aloud letter by letter: "A. B. A. F. T" (no trailing
+ *  period — see grading.ts). */
 export function spelledAloud(spelling: string): string {
-  return spelling.toUpperCase().split('').join('. ') + '.';
+  return spelling.toUpperCase().split('').join('. ');
 }
 
 export function stopAudio(): void {

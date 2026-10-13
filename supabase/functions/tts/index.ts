@@ -76,7 +76,9 @@ serve(async (req) => {
       Authorization: `Bearer ${GROQ_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ model: GROQ_MODEL, input, voice, response_format: 'wav', speed: ttsSpeed }),
+    // MP3: far better iOS playback reliability than WAV for blob URLs,
+    // and ~10x smaller (less to truncate in transit).
+    body: JSON.stringify({ model: GROQ_MODEL, input, voice, response_format: 'mp3', speed: ttsSpeed }),
   });
 
   if (!groqRes.ok) {
@@ -89,7 +91,7 @@ serve(async (req) => {
   return new Response(audio, {
     headers: {
       ...CORS,
-      'Content-Type': 'audio/wav',
+      'Content-Type': 'audio/mpeg',
       'Cache-Control': 'public, max-age=31536000, immutable',
     },
   });
