@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/beekeeper-web/sw.js', { scope: '/beekeeper-web/' })})}
