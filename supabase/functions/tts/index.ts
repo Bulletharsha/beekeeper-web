@@ -58,11 +58,14 @@ serve(async (req) => {
     return new Response('rate limited — try again shortly', { status: 429, headers: CORS });
   }
 
-  const { text, voice, cheerful } = await req.json();
+  const { text, voice, cheerful, speed } = await req.json();
   if (typeof text !== 'string' || text.length === 0 || text.length > 180) {
     return new Response('text must be 1–180 chars', { status: 400, headers: CORS });
   }
   if (!VOICES.has(voice)) return new Response('unknown voice', { status: 400, headers: CORS });
+  // Narration speed: client sends 1.1 for the 10% speedup. Clamp to the
+  // API's accepted range; word pronunciations never go through here.
+  const ttsSpeed = typeof speed === 'number' && speed >= 0.25 && speed <= 4 ? speed : 1;
 
   // Cheerful tone: prefix with a delivery hint Orpheus understands.
   const input = cheerful ? `*cheerful* ${text}` : text;
@@ -73,7 +76,7 @@ serve(async (req) => {
       Authorization: `Bearer ${GROQ_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ model: GROQ_MODEL, input, voice, response_format: 'wav' }),
+    body: JSON.stringify({ model: GROQ_MODEL, input, voice, response_format: 'wav', speed: ttsSpeed }),
   });
 
   if (!groqRes.ok) {

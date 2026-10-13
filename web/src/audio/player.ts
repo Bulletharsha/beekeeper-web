@@ -46,7 +46,53 @@ export function previewVoice(v: GroqVoiceId): void {
   speakText('The meaning of the word abaft is: toward the back of a ship.', false, 1.0);
 }
 
+/** Narration speed: 10% faster than natural (1.0). Word pronunciations
+ *  (playWordAudio) stay at natural speed — only the talking-around-it
+ *  gets quicker. */
+export const NARRATION_RATE = 1.05;
+
 let currentAudio: HTMLAudioElement | null = null;
+/**
+ * Monotonic generation: every speakText() bumps this. An async Groq fetch
+ * that completes after a newer speakText() started is stale — it must not
+ * play (it would talk over the new utterance).
+ */
+let speakGeneration = 0;
+
+/** Groq Orpheus speed for narration (10% up). Words stay untouched. */
+const GROQ_NARRATION_SPEED = 1.1;
+
+/**
+ * Minimum plausible WAV duration for a TTS text, in seconds. Groq audio
+ * sometimes arrives truncated (the stream drops mid-response and
+ * res.blob() silently accepts the partial file) — the last second or two
+ * goes missing, which is exactly "skips the last 1-2 letters". Anything
+ * shorter than this is treated as truncated: retry once, then fall back
+ * to system speech rather than play a clipped utterance.
+ */
+function minDurationSec(text: string): number {
+  // ~20 chars/sec is brisk narration; anything under this for the text
+  // length means the stream dropped mid-utterance.
+  return Math.max(1.5, text.length * 0.05);
+}
+
+/** Parse a WAV blob's duration in seconds; null when unparseable. */
+async function wavDurationSec(blob: Blob): Promise<number | null> {
+  try {
+    const buf = await blob.slice(0, 44).arrayBuffer();
+    const v = new DataView(buf);
+    if (v.getUint32(0) !== 0x52494646) return null; // "RIFF"
+    const sampleRate = v.getUint32(24, true);
+    const byteRate = v.getUint32(28, true);
+    const dataSize = v.getUint32(40, true);
+    if (!sampleRate || !byteRate) return null;
+    // dataSize 0xFFFFFFFF = streaming/unknown length; fall back to blob size.
+    const bytes = dataSize === 0xffffffff ? blob.size - 44 : dataSize;
+    return bytes / byteRate;
+  } catch {
+    return null;
+  }
+}
 
 function stopCurrent(): void {
   if (currentAudio) {
@@ -81,7 +127,8 @@ export function playWordAudio(audioUrl: string | undefined, spelling: string): v
  *  synthesis — called SYNCHRONOUSLY. iOS Safari silently ignores
  *  speechSynthesis.speak() once the user-gesture call stack is gone, so
  *  no await may precede it on the fallback path. */
-export function speakText(text: string, cheerful = false, rate = 0.95): void {
+export function speakText(text: string, cheerful = false, rate = NARRATION_RATE): void {
+  const gen = ++speakGeneration;
   stopCurrent();
   const voice = getVoice();
   const key = cacheKey(text, voice, cheerful);
@@ -95,7 +142,7 @@ export function speakText(text: string, cheerful = false, rate = 0.95): void {
   if (TTS_URL && SUPABASE_ANON_KEY && !groqKnownMissing) {
     // Groq via edge function, in the background. Falls back to system
     // speech if the key isn't configured server-side yet.
-    void fetchGroqNarration(text, voice, cheerful, key, rate);
+    void fetchGroqNarration(text, voice, cheerful, key, rate, gen);
     return;
   }
   speakWithFallback(text, rate);
@@ -103,14 +150,19 @@ export function speakText(text: string, cheerful = false, rate = 0.95): void {
 
 /** Groq Orpheus narration (async by nature). Gets a fresh token (signing in
  *  anonymously if needed) rather than trusting the cached one, and retries
- *  once on 401 in case the session expired. */
+ *  once on 401 in case the session expired. Validates the WAV duration and
+ *  retries once on truncation — a clipped utterance is worse than the
+ *  system-voice fallback. Stale completions (a newer speakText superseded
+ *  this one) never play. */
 async function fetchGroqNarration(
   text: string,
   voice: GroqVoiceId,
   cheerful: boolean,
   key: string,
   rate: number,
+  gen: number,
 ): Promise<void> {
+  const isStale = () => gen !== speakGeneration;
   try {
     let token: string | null = null;
     if (supabase) {
@@ -121,6 +173,7 @@ async function fetchGroqNarration(
         token = anon.session?.access_token ?? null;
       }
     }
+    if (isStale()) return;
     const doFetch = (t: string | null) =>
       fetch(TTS_URL as string, {
         method: 'POST',
@@ -129,26 +182,40 @@ async function fetchGroqNarration(
           'apikey': SUPABASE_ANON_KEY,
           'Authorization': `Bearer ${t ?? SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ text, voice, cheerful }),
+        body: JSON.stringify({ text, voice, cheerful, speed: GROQ_NARRATION_SPEED }),
       });
-    let res = await doFetch(token);
-    if (res.status === 401 && supabase) {
-      // Token may have expired — refresh and retry once.
-      const { data } = await supabase.auth.refreshSession();
-      res = await doFetch(data.session?.access_token ?? null);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (isStale()) return;
+      let res = await doFetch(token);
+      if (res.status === 401 && supabase) {
+        // Token may have expired — refresh and retry once.
+        const { data } = await supabase.auth.refreshSession();
+        token = data.session?.access_token ?? null;
+        res = await doFetch(token);
+      }
+      if (!res.ok) {
+        if (res.status === 503) groqKnownMissing = true; // no server key yet
+        throw new Error(`tts ${res.status}`);
+      }
+      const blob = await res.blob();
+      if (isStale()) return;
+      const dur = await wavDurationSec(blob);
+      const minDur = minDurationSec(text);
+      if (dur !== null && dur < minDur) {
+        // Truncated audio — retry once, then fall back to system speech.
+        if (attempt === 0) continue;
+        throw new Error(`tts truncated (${dur.toFixed(1)}s < ${minDur.toFixed(1)}s)`);
+      }
+      const url = URL.createObjectURL(blob);
+      ttsCache.set(key, url);
+      if (isStale()) return;
+      const audio = new Audio(url);
+      currentAudio = audio;
+      await audio.play().catch(() => speakWithFallback(text, rate));
+      return;
     }
-    if (!res.ok) {
-      if (res.status === 503) groqKnownMissing = true; // no server key yet
-      throw new Error(`tts ${res.status}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    ttsCache.set(key, url);
-    const audio = new Audio(url);
-    currentAudio = audio;
-    await audio.play().catch(() => speakWithFallback(text, rate));
   } catch {
-    speakWithFallback(text, rate);
+    if (!isStale()) speakWithFallback(text, rate);
   }
 }
 

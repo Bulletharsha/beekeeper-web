@@ -300,7 +300,7 @@ export default function Quiz({ profile, onExit, resume }: Props) {
                 key={h.kind}
                 onClick={() => {
                   // Hints read slower so young kids can follow.
-                  void speakText(engine.hintText(h.kind), false, 0.72);
+                  void speakText(engine.hintText(h.kind), false, 0.79);
                 }}
               >
                 {h.label}
